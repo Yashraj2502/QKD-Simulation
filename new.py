@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy import optimize
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
@@ -54,11 +53,9 @@ class QKDSimulation:
 
     def transmission(self, distance):
         """Calculate optical transmission over fiber distance"""
-        # return np.exp(-self.alpha * distance)
-        # 0.2 dB/km → 0.04605/km linear attenuation
-        return 10 ** (-self.alpha_db * distance / 10)
+        return np.exp(-self.alpha * distance)
 
-def calculate_raman_noise(self, distance, classical_power, filter_width):
+    def calculate_raman_noise(self, distance, classical_power, filter_width):
         """
         Calculate Raman scattering noise photon count rate
         Args:
@@ -68,22 +65,24 @@ def calculate_raman_noise(self, distance, classical_power, filter_width):
         Returns:
             Raman noise count probability per detection window
         """
-        # Convert power from mW to W (critical!)
-        power_watts = classical_power * 1e-3
+        # Constants for Raman noise model
+        beta = 7e-9  # Raman coefficient [(count/s)/(nm·mW·km)]
 
-        # More realistic coefficients (based on experimental data)
-        raman_coeff = 1e-9  # photons/(nm·W·km)
+        # Calculate wavelength difference
         delta_lambda = abs(self.wavelength_classical - self.wavelength_quantum)
 
-        # Exponential decay with wavelength spacing
-        spectral_factor = np.exp(-delta_lambda / 40)
+        # Raman noise scales with distance, classical power, and filter width
+        # but reduces with channel spacing
+        raman_factor = np.exp(-0.04 * delta_lambda)  # Empirical decay with spacing
 
-        # Total noise photons
-        noise_photons = (raman_coeff * power_watts * distance *
-                         filter_width * spectral_factor)
+        # Total counts from Raman scattering
+        raman_counts = beta * classical_power * distance * filter_width * raman_factor
 
-        # Convert to probability per detection window
-        return noise_photons * self.detector_types[self.current_detector]['time_window']
+        # Convert to probability within detection window
+        detector = self.detector_types[self.current_detector]
+        raman_probability = raman_counts * detector['time_window']
+
+        return raman_probability
 
     def calculate_qber(self, distance, classical_power, filter_width):
         """Calculate Quantum Bit Error Rate"""
