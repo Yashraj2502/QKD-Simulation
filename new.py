@@ -22,12 +22,14 @@ class QKDSimulation:
         # Fiber Parameters
         self.alpha_db = 0.2  # Fiber attenuation [dB/km]
         self.alpha = self.alpha_db / (10 * np.log10(np.e))  # Linear attenuation coefficient [1/km]
+        self.raman_coeff = 7e-9 # Raman coefficient [(counts/s)/(mW·nm·km)]
 
         # QKD Protocol Parameters
         self.mu = 0.5  # Mean photon number
         self.q = 0.5  # Sifting factor (for BB84)
         self.error_correction_factor = 1.15  # Error correction inefficiency
         self.privacy_amplification_factor = 1.1  # Privacy amplification overhead
+        self.fec_efficiency = 0.95
 
         # Detector Parameters
         self.detector_types = {
@@ -38,22 +40,22 @@ class QKDSimulation:
             },
             'SSPD': {
                 'efficiency': 0.85,  # Higher quantum efficiency
-                'dark_count': 1e-9,  # Lower dark count
-                'time_window': 1e-9  # Detection window [s]
+                'dark_count': 5e-8,  # Lower dark count
+                'jitter': 50e-12  # Detection window [s]
             }
         }
-        self.current_detector = 'InGaAs'  # Default detector
+        self.current_detector = 'SSPD'  # Default detector
 
         # Default WDM Parameter Settings
         self.wavelength_quantum = 1550  # Quantum channel wavelength [nm]
-        self.wavelength_classical = 1570  # Classical channel wavelength [nm]
-        self.filter_width = 0.8  # Quantum channel filter width [nm]
+        self.wavelength_classical = 1560  # Classical channel wavelength [nm]
+        self.filter_width = 0.5  # Quantum channel filter width [nm]
         self.classical_power = 0  # Classical channel power [mW]
         self.channel_spacing = 20  # Spacing between quantum and classical [nm]
 
     def transmission(self, distance):
         """Calculate optical transmission over fiber distance"""
-        return np.exp(-self.alpha * distance)
+        return 10 ** (-self.alpha_db * distance / 10)
 
     def calculate_raman_noise(self, distance, classical_power, filter_width):
         """
@@ -65,24 +67,30 @@ class QKDSimulation:
         Returns:
             Raman noise count probability per detection window
         """
-        # Constants for Raman noise model
-        beta = 7e-9  # Raman coefficient [(count/s)/(nm·mW·km)]
+        # # Constants for Raman noise model
+        # beta = 7e-9  # Raman coefficient [(count/s)/(nm·mW·km)]
+        #
+        # # Calculate wavelength difference
+        # delta_lambda = abs(self.wavelength_classical - self.wavelength_quantum)
+        #
+        # # Raman noise scales with distance, classical power, and filter width
+        # # but reduces with channel spacing
+        # raman_factor = np.exp(-0.04 * delta_lambda)  # Empirical decay with spacing
+        #
+        # # Total counts from Raman scattering
+        # raman_counts = beta * classical_power * distance * filter_width * raman_factor
+        #
+        # # Convert to probability within detection window
+        # detector = self.detector_types[self.current_detector]
+        # raman_probability = raman_counts * detector['time_window']
+        #
+        # return raman_probability
 
-        # Calculate wavelength difference
         delta_lambda = abs(self.wavelength_classical - self.wavelength_quantum)
+        spectral_decay = np.exp(-delta_lambda / 25)  # Empirical decay
 
-        # Raman noise scales with distance, classical power, and filter width
-        # but reduces with channel spacing
-        raman_factor = np.exp(-0.04 * delta_lambda)  # Empirical decay with spacing
-
-        # Total counts from Raman scattering
-        raman_counts = beta * classical_power * distance * filter_width * raman_factor
-
-        # Convert to probability within detection window
-        detector = self.detector_types[self.current_detector]
-        raman_probability = raman_counts * detector['time_window']
-
-        return raman_probability
+        return (self.raman_coeff * (classical_power * 1e-3) * distance *
+                filter_width * spectral_decay * 1e9)  # Scaled to detection window
 
     def calculate_qber(self, distance, classical_power, filter_width):
         """Calculate Quantum Bit Error Rate"""
@@ -92,46 +100,69 @@ class QKDSimulation:
         # Signal detection probability (per sent qubit)
         detector = self.detector_types[self.current_detector]
 
-        # Add signal reduction factor for very narrow filters (new)
-        # This creates a tradeoff - too narrow filters reduce signal
-        signal_reduction = 1.0
-        if filter_width < 0.5:
-            # Signal starts reducing if filter is too narrow (<0.5nm)
-            signal_reduction = 2 * filter_width  # Linear model for simplicity
+        # # Add signal reduction factor for very narrow filters (new)
+        # # This creates a tradeoff - too narrow filters reduce signal
+        # signal_reduction = 1.0
+        # if filter_width < 0.5:
+        #     # Signal starts reducing if filter is too narrow (<0.5nm)
+        #     signal_reduction = 2 * filter_width  # Linear model for simplicity
+        #
+        # signal_prob = self.mu * t * detector['efficiency'] * signal_reduction
+        #
+        # # Noise sources
+        # dark_count_prob = detector['dark_count']
+        # raman_prob = self.calculate_raman_noise(distance, classical_power, filter_width)
+        # total_noise_prob = dark_count_prob + raman_prob
+        #
+        # # Quantum Bit Error Rate calculation
+        # # QBER = (0.5 × noise) / (signal + noise)
+        # # 0.5 factor because noise contributes random bits (50% error)
+        # qber = (0.5 * total_noise_prob) / (signal_prob + total_noise_prob)
+        #
+        # return qber, signal_prob, total_noise_prob
 
-        signal_prob = self.mu * t * detector['efficiency'] * signal_reduction
+        # Signal with bandwidth-dependent efficiency
+        signal = self.mu * t * detector['efficiency'] * (filter_width / 0.5) ** 0.75
 
-        # Noise sources
-        dark_count_prob = detector['dark_count']
-        raman_prob = self.calculate_raman_noise(distance, classical_power, filter_width)
-        total_noise_prob = dark_count_prob + raman_prob
+        # Noise components
+        dark = detector['dark_count']
+        raman = self.calculate_raman_noise(distance, classical_power, filter_width)
+        total_noise = dark + raman
 
-        # Quantum Bit Error Rate calculation
-        # QBER = (0.5 × noise) / (signal + noise)
-        # 0.5 factor because noise contributes random bits (50% error)
-        qber = (0.5 * total_noise_prob) / (signal_prob + total_noise_prob)
+        # QBER with 1% baseline and cap at 0.5
+        qber_val = min(0.01 + (0.5 * total_noise) / (signal + total_noise), 0.5)
+        return qber_val, signal, total_noise
 
-        return qber, signal_prob, total_noise_prob
 
     def calculate_key_rate(self, distance, classical_power, filter_width):
         """Calculate secure key rate"""
         qber, signal_prob, noise_prob = self.calculate_qber(distance, classical_power, filter_width)
 
-        # Raw key rate (bits per sent pulse)
-        raw_rate = signal_prob + noise_prob
+        # # Raw key rate (bits per sent pulse)
+        # raw_rate = signal_prob + noise_prob
+        #
+        # # Secure key fraction (from GLLP security proof)
+        # if qber >= 0.11:  # Approximate threshold for BB84
+        #     return 0, qber  # No secure key possible
+        #
+        # # Simplified secure key fraction formula
+        # secure_fraction = 1 - self.error_correction_factor * qber * np.log2(1 / qber) - (1 - qber) * np.log2(
+        #     1 / (1 - qber))
+        #
+        # # Final key rate
+        # key_rate = self.q * raw_rate * secure_fraction
+        #
+        # return max(0, key_rate), qber
 
-        # Secure key fraction (from GLLP security proof)
-        if qber >= 0.11:  # Approximate threshold for BB84
-            return 0, qber  # No secure key possible
+        if qber >= 0.11 or signal_prob < 1e-10:
+            return 0.0, qber
 
-        # Simplified secure key fraction formula
-        secure_fraction = 1 - self.error_correction_factor * qber * np.log2(1 / qber) - (1 - qber) * np.log2(
-            1 / (1 - qber))
+        # Complete key rate components
+        sifted_rate = (signal_prob + noise_prob) * 0.5  # Basis sifting
+        error_correction = self.fec_efficiency * (1 - 1.16 * qber)
+        privacy_amp = 1 - 2 * qber * np.log2(qber) - 2 * (1 - qber) * np.log2(1 - qber)
 
-        # Final key rate
-        key_rate = self.q * raw_rate * secure_fraction
-
-        return max(0, key_rate), qber
+        return max(1e-10, sifted_rate * error_correction * privacy_amp), qber
 
     def set_detector(self, detector_type):
         """Change detector type"""
@@ -150,32 +181,48 @@ class QKDSimulation:
 
         plt.figure(figsize=(10, 6))
 
+        # for power in classical_powers:
+        #     key_rates = []
+        #     qbers = []
+        #
+        #     for d in distances:
+        #         key_rate, qber = self.calculate_key_rate(d, power, self.filter_width)
+        #         key_rates.append(key_rate)
+        #         qbers.append(qber)
+        #
+        #     plt.semilogy(distances, key_rates, label=f'Power: {power} mW')
+        #
+        # plt.xlabel('Distance (km)')
+        # plt.ylabel('Secure Key Rate (per pulse)')
+        # plt.title('Key Rate vs. Distance for Different Classical Powers')
+        # plt.grid(True, which="both", ls="--")
+        # plt.legend()
+        # plt.tight_layout()
+        # return plt.gcf()
+
+
         for power in classical_powers:
-            key_rates = []
-            qbers = []
-
-            for d in distances:
-                key_rate, qber = self.calculate_key_rate(d, power, self.filter_width)
-                key_rates.append(key_rate)
-                qbers.append(qber)
-
-            plt.semilogy(distances, key_rates, label=f'Power: {power} mW')
+            rates = [self.calculate_key_rate(d, power, self.filter_width)[0]
+                     for d in distances]
+            plt.semilogy(distances, rates, label=f'{power} mW', linewidth=2)
 
         plt.xlabel('Distance (km)')
-        plt.ylabel('Secure Key Rate (per pulse)')
-        plt.title('Key Rate vs. Distance for Different Classical Powers')
-        plt.grid(True, which="both", ls="--")
+        plt.ylabel('Secure Key Rate (bits/pulse)')
+        plt.title('Key Rate vs Distance with Classical Interference')
+        plt.grid(True, which='both', linestyle='--', alpha=0.5)
         plt.legend()
+        plt.ylim(1e-5, 1e0)  # Adjusted y-axis limits
         plt.tight_layout()
+        # plt.savefig('key_rate_vs_distance.png', dpi=300)
         return plt.gcf()
 
     def plot_qber_vs_spacing(self, spacings=None, distances=None):
         """Plot QBER vs. channel spacing for different distances"""
         if spacings is None:
-            spacings = np.linspace(10, 100, 50)  # 10 to 100 nm
+            spacings = np.linspace(0.4, 2.0, 50)  # 10 to 100 nm
 
         if distances is None:
-            distances = [10, 30, 50]  # km
+            distances = [20, 50, 80]  # km
 
         plt.figure(figsize=(10, 6))
 
@@ -188,24 +235,26 @@ class QKDSimulation:
             for spacing in spacings:
                 # Update wavelength to reflect spacing
                 self.wavelength_classical = self.wavelength_quantum + spacing
-                self.channel_spacing = spacing
+                # self.channel_spacing = spacing
 
                 # Calculate QBER with fixed classical power
                 fixed_power = 5  # mW
-                qber, _, _ = self.calculate_qber(d, fixed_power, self.filter_width)
+                qber, val, _ = self.calculate_qber(d, fixed_power, self.filter_width)
                 qbers.append(qber)
 
-            plt.plot(spacings, qbers, label=f'Distance: {d} km')
+            plt.plot(spacings, qbers, label=f'Distance: {d} km', linewidth=2)
 
         # Reset to original values
         self.wavelength_classical = original_wavelength
         self.channel_spacing = original_spacing
 
+        plt.axhline(y=0.11, color='r', linestyle='--', label='QBER threshold')
         plt.xlabel('Channel Spacing (nm)')
         plt.ylabel('QBER')
-        plt.title('QBER vs. Channel Spacing for Different Distances')
+        plt.title('QBER vs Channel Spacing (5 mW Classical Power)')
         plt.grid(True)
         plt.legend()
+        plt.ylim(0, 0.5)
         plt.tight_layout()
         return plt.gcf()
 
@@ -242,7 +291,7 @@ class QKDSimulation:
             filter_widths = np.linspace(0.1, 2.0, 50)  # 0.1 to 2.0 nm
 
         if distances is None:
-            distances = [10, 30, 50]  # km
+            distances = [20, 50, 80]  # km
 
         plt.figure(figsize=(10, 6))
 
@@ -543,6 +592,7 @@ class QKDSimulation:
 
 # Example usage
 if __name__ == "__main__":
+    plt.close('all')
     sim = QKDSimulation()
 
     # Run all simulations
