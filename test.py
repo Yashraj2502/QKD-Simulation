@@ -8,98 +8,88 @@ from scipy.special import erfcinv
 
 
 class QKDSimulation:
-    """Fully corrected QKD simulation with proper physical models"""
+    """Complete QKD simulation with all fixes implemented"""
 
     def __init__(self):
         # Physical constants
         self.h = 6.626e-34  # Planck's constant
         self.c = 3e8  # Speed of light
 
-        # Fiber parameters (updated values)
+        # Fiber parameters
         self.alpha_db = 0.2  # Attenuation [dB/km]
-        self.alpha_linear = 0.046  # Linear attenuation [1/km]
-        self.raman_coeff = 5e-9  # [(counts/s)/(mW·nm·km)]
+        self.raman_coeff = 7e-9  # Raman coefficient [(counts/s)/(mW·nm·km)]
 
-        # QKD protocol
+        # Protocol parameters
         self.mu = 0.5  # Mean photon number
-        self.q = 0.5  # Basis sifting factor
         self.fec_efficiency = 0.95
 
-        # Detector parameters (updated)
+        # Detector parameters
         self.detectors = {
             'SNSPD': {
                 'efficiency': 0.85,
-                'dark_count': 1e-7,  # More realistic dark count rate
+                'dark_count': 5e-8,
                 'jitter': 50e-12
             }
         }
         self.current_detector = 'SNSPD'
 
-        # System parameters
+        # System configuration
         self.wavelength_q = 1550  # Quantum channel [nm]
         self.wavelength_c = 1560  # Classical channel [nm]
-        self.default_filter_bw = 0.5  # [nm]
-        self.channel_spacing = 0.8  # [nm]
+        self.default_filter_bw = 0.5  # Default filter bandwidth [nm]
 
     def transmission(self, distance):
-        """Correct fiber transmission with proper dB conversion"""
+        """Fiber transmission loss"""
         return 10 ** (-self.alpha_db * distance / 10)
 
     def raman_noise(self, distance, power, filter_bw):
-        """Physically accurate Raman noise model"""
+        """Raman scattering noise calculation"""
         delta_lambda = abs(self.wavelength_c - self.wavelength_q)
-        spectral_decay = np.exp(-delta_lambda / 30)  # Adjusted decay
+        spectral_decay = np.exp(-delta_lambda / 25)  # Empirical decay
 
-        # Convert power from mW to W for proper scaling
-        noise_photons = (self.raman_coeff * (power * 1e-3) * distance *
-                         filter_bw * spectral_decay)
-
-        return noise_photons * 1e9  # Scale to match detection window
+        return (self.raman_coeff * (power * 1e-3) * distance *
+                filter_bw * spectral_decay * 1e9)  # Scaled to detection window
 
     def qber(self, distance, classical_power, filter_bw):
-        """Complete QBER calculation with realistic components"""
+        """Quantum Bit Error Rate calculation"""
         t = self.transmission(distance)
         detector = self.detectors[self.current_detector]
 
-        # Signal photons (with realistic detector effects)
-        signal = self.mu * t * detector['efficiency'] * np.sqrt(filter_bw / 0.5)
+        # Signal with bandwidth-dependent efficiency
+        signal = self.mu * t * detector['efficiency'] * (filter_bw / 0.5) ** 0.75
 
-        # Noise sources (properly scaled)
+        # Noise components
         dark = detector['dark_count']
         raman = self.raman_noise(distance, classical_power, filter_bw)
         total_noise = dark + raman
 
-        # QBER with 1% baseline misalignment
-        qber = 0.01 + (0.5 * total_noise) / (signal + total_noise)
-        return min(qber, 0.5), signal, total_noise  # Cap at 50%
+        # QBER with 1% baseline and cap at 0.5
+        qber_val = min(0.01 + (0.5 * total_noise) / (signal + total_noise), 0.5)
+        return qber_val, signal, total_noise
 
     def secret_key_rate(self, distance, classical_power, filter_bw):
-        """GLLP key rate with proper scaling"""
+        """Secure key rate calculation"""
         qber_val, signal, noise = self.qber(distance, classical_power, filter_bw)
 
         if qber_val >= 0.11 or signal < 1e-10:
             return 0.0, qber_val
 
-        # Realistic key rate components
-        sifted_rate = (signal + noise) * self.q
+        # Complete key rate components
+        sifted_rate = (signal + noise) * 0.5  # Basis sifting
         error_correction = self.fec_efficiency * (1 - 1.16 * qber_val)
         privacy_amp = 1 - 2 * qber_val * np.log2(qber_val) - 2 * (1 - qber_val) * np.log2(1 - qber_val)
 
-        skr = sifted_rate * error_correction * privacy_amp
-        return max(1e-10, skr), qber_val
+        return max(1e-10, sifted_rate * error_correction * privacy_amp), qber_val
 
     def plot_key_rate_vs_distance(self):
-        """Corrected key rate plot"""
+        """Plot key rate vs distance"""
         distances = np.linspace(1, 100, 50)
-        powers = [0, 1, 5, 10]  # mW
+        powers = [0, 1, 5, 10]
 
         plt.figure(figsize=(10, 6))
         for power in powers:
-            rates = []
-            for d in distances:
-                rate, _ = self.secret_key_rate(d, power, self.default_filter_bw)
-                rates.append(rate)
-
+            rates = [self.secret_key_rate(d, power, self.default_filter_bw)[0]
+                     for d in distances]
             plt.semilogy(distances, rates, label=f'{power} mW', linewidth=2)
 
         plt.xlabel('Distance (km)')
@@ -107,21 +97,21 @@ class QKDSimulation:
         plt.title('Key Rate vs Distance with Classical Interference')
         plt.grid(True, which='both', linestyle='--', alpha=0.5)
         plt.legend()
+        plt.ylim(1e-5, 1e0)  # Adjusted y-axis limits
         plt.tight_layout()
-        plt.savefig('key_rate_vs_distance.png')
+        # plt.savefig('key_rate_vs_distance.png', dpi=300)
         plt.show()
 
     def plot_qber_vs_spacing(self):
-        """QBER with proper spacing effects"""
+        """Plot QBER vs channel spacing"""
         spacings = np.linspace(0.4, 2.0, 50)
         distances = [20, 50, 80]
-        power = 5  # mW
+        power = 5
 
         plt.figure(figsize=(10, 6))
         for d in distances:
             qbers = []
             for spacing in spacings:
-                self.channel_spacing = spacing
                 self.wavelength_c = self.wavelength_q + spacing
                 qber_val, _, _ = self.qber(d, power, self.default_filter_bw)
                 qbers.append(qber_val)
@@ -134,14 +124,16 @@ class QKDSimulation:
         plt.title('QBER vs Channel Spacing (5 mW Classical Power)')
         plt.grid(True)
         plt.legend()
-        plt.savefig('qber_vs_spacing.png')
+        plt.ylim(0, 0.5)
+        plt.tight_layout()
+        # plt.savefig('qber_vs_spacing.png', dpi=300)
         plt.show()
 
     def plot_filter_optimization(self):
-        """Realistic filter optimization"""
+        """Plot filter bandwidth optimization"""
         filter_widths = np.linspace(0.1, 2.0, 50)
         distances = [20, 50, 80]
-        power = 5  # mW
+        power = 5
 
         plt.figure(figsize=(10, 6))
         for d in distances:
@@ -161,21 +153,22 @@ class QKDSimulation:
         plt.title('Filter Bandwidth Optimization (5 mW Classical Power)')
         plt.grid(True)
         plt.legend()
-        plt.savefig('filter_optimization.png')
+        plt.ylim(0, None)  # Ensure no negative values
+        plt.tight_layout()
+        # plt.savefig('filter_optimization.png', dpi=300)
         plt.show()
 
     def generate_ml_data(self, samples=1000):
-        """Generate meaningful ML training data"""
+        """Generate training data for ML model"""
         data = []
         for _ in range(samples):
             d = np.random.uniform(5, 150)
             p = np.random.uniform(0, 20)
             s = np.random.uniform(0.4, 2.0)
 
-            self.channel_spacing = s
             self.wavelength_c = self.wavelength_q + s
 
-            # Find true optimal filter width
+            # Find optimal filter width
             widths = np.linspace(0.1, 2.0, 20)
             rates = [self.secret_key_rate(d, p, w)[0] for w in widths]
             opt_width = widths[np.argmax(rates)]
@@ -193,8 +186,8 @@ class QKDSimulation:
         return pd.DataFrame(data)
 
     def train_ml_model(self):
-        """Train meaningful filter width predictor"""
-        df = self.generate_ml_data()
+        """Train ML model for filter optimization"""
+        df = self.generate_ml_data(2000)
         print(f"Unique optimal widths: {df['optimal_width'].nunique()}")
         print(f"Width range: {df['optimal_width'].min():.2f}-{df['optimal_width'].max():.2f} nm")
 
@@ -203,7 +196,7 @@ class QKDSimulation:
 
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 
-        model = RandomForestRegressor(n_estimators=200, max_depth=5)
+        model = RandomForestRegressor(n_estimators=200, max_depth=5, min_samples_leaf=5)
         model.fit(X_train, y_train)
 
         print(f"\nTest MSE: {mean_squared_error(y_test, model.predict(X_test)):.6f}")
@@ -214,9 +207,10 @@ class QKDSimulation:
 
 
 if __name__ == "__main__":
+    plt.close('all')
     sim = QKDSimulation()
 
-    print("Generating physical simulation plots...")
+    print("Generating simulation plots...")
     sim.plot_key_rate_vs_distance()
     sim.plot_qber_vs_spacing()
     sim.plot_filter_optimization()
