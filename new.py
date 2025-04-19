@@ -67,25 +67,6 @@ class QKDSimulation:
         Returns:
             Raman noise count probability per detection window
         """
-        # # Constants for Raman noise model
-        # beta = 7e-9  # Raman coefficient [(count/s)/(nm·mW·km)]
-        #
-        # # Calculate wavelength difference
-        # delta_lambda = abs(self.wavelength_classical - self.wavelength_quantum)
-        #
-        # # Raman noise scales with distance, classical power, and filter width
-        # # but reduces with channel spacing
-        # raman_factor = np.exp(-0.04 * delta_lambda)  # Empirical decay with spacing
-        #
-        # # Total counts from Raman scattering
-        # raman_counts = beta * classical_power * distance * filter_width * raman_factor
-        #
-        # # Convert to probability within detection window
-        # detector = self.detector_types[self.current_detector]
-        # raman_probability = raman_counts * detector['time_window']
-        #
-        # return raman_probability
-
         delta_lambda = abs(self.wavelength_classical - self.wavelength_quantum)
         spectral_decay = np.exp(-delta_lambda / 25)  # Empirical decay
 
@@ -99,27 +80,6 @@ class QKDSimulation:
 
         # Signal detection probability (per sent qubit)
         detector = self.detector_types[self.current_detector]
-
-        # # Add signal reduction factor for very narrow filters (new)
-        # # This creates a tradeoff - too narrow filters reduce signal
-        # signal_reduction = 1.0
-        # if filter_width < 0.5:
-        #     # Signal starts reducing if filter is too narrow (<0.5nm)
-        #     signal_reduction = 2 * filter_width  # Linear model for simplicity
-        #
-        # signal_prob = self.mu * t * detector['efficiency'] * signal_reduction
-        #
-        # # Noise sources
-        # dark_count_prob = detector['dark_count']
-        # raman_prob = self.calculate_raman_noise(distance, classical_power, filter_width)
-        # total_noise_prob = dark_count_prob + raman_prob
-        #
-        # # Quantum Bit Error Rate calculation
-        # # QBER = (0.5 × noise) / (signal + noise)
-        # # 0.5 factor because noise contributes random bits (50% error)
-        # qber = (0.5 * total_noise_prob) / (signal_prob + total_noise_prob)
-        #
-        # return qber, signal_prob, total_noise_prob
 
         # Signal with bandwidth-dependent efficiency
         signal = self.mu * t * detector['efficiency'] * (filter_width / 0.5) ** 0.75
@@ -138,21 +98,6 @@ class QKDSimulation:
         """Calculate secure key rate"""
         qber, signal_prob, noise_prob = self.calculate_qber(distance, classical_power, filter_width)
 
-        # # Raw key rate (bits per sent pulse)
-        # raw_rate = signal_prob + noise_prob
-        #
-        # # Secure key fraction (from GLLP security proof)
-        # if qber >= 0.11:  # Approximate threshold for BB84
-        #     return 0, qber  # No secure key possible
-        #
-        # # Simplified secure key fraction formula
-        # secure_fraction = 1 - self.error_correction_factor * qber * np.log2(1 / qber) - (1 - qber) * np.log2(
-        #     1 / (1 - qber))
-        #
-        # # Final key rate
-        # key_rate = self.q * raw_rate * secure_fraction
-        #
-        # return max(0, key_rate), qber
 
         if qber >= 0.11 or signal_prob < 1e-10:
             return 0.0, qber
@@ -180,26 +125,6 @@ class QKDSimulation:
             classical_powers = [0, 1, 5, 10]  # Different classical powers in mW
 
         plt.figure(figsize=(10, 6))
-
-        # for power in classical_powers:
-        #     key_rates = []
-        #     qbers = []
-        #
-        #     for d in distances:
-        #         key_rate, qber = self.calculate_key_rate(d, power, self.filter_width)
-        #         key_rates.append(key_rate)
-        #         qbers.append(qber)
-        #
-        #     plt.semilogy(distances, key_rates, label=f'Power: {power} mW')
-        #
-        # plt.xlabel('Distance (km)')
-        # plt.ylabel('Secure Key Rate (per pulse)')
-        # plt.title('Key Rate vs. Distance for Different Classical Powers')
-        # plt.grid(True, which="both", ls="--")
-        # plt.legend()
-        # plt.tight_layout()
-        # return plt.gcf()
-
 
         for power in classical_powers:
             rates = [self.calculate_key_rate(d, power, self.filter_width)[0]
@@ -626,9 +551,5 @@ if __name__ == "__main__":
     print("Validating ML model performance...")
     results = sim.plot_ml_vs_keyrate(model)
     # plt.savefig('ml_improvements.png')
-
-    print("Results summary:")
-    # print(f"Average key rate improvement: {results['improvement'].mean():.2f}x")
-    # print(f"Maximum key rate improvement: {results['improvement'].max():.2f}x")
 
     plt.show()
