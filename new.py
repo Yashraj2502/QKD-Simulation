@@ -524,23 +524,23 @@ if __name__ == "__main__":
 
     # 1. Key Rate vs Distance with different classical powers
     sim.plot_key_rate_vs_distance()
-    plt.savefig('key_rate_vs_distance.png')
+    # plt.savefig('key_rate_vs_distance.png')
 
     # 2. QBER vs Channel Spacing
     sim.plot_qber_vs_spacing()
-    plt.savefig('qber_vs_spacing.png')
+    # plt.savefig('qber_vs_spacing.png')
 
     # 3. Raman Noise vs Classical Power
     sim.plot_raman_vs_power()
-    plt.savefig('raman_vs_power.png')
+    # plt.savefig('raman_vs_power.png')
 
     # 4. Key Rate vs Filter Width
     sim.plot_filter_vs_keyrate()
-    plt.savefig('filter_vs_keyrate.png')
+    # plt.savefig('filter_vs_keyrate.png')
 
     # 5. Detector Comparison
     sim.plot_detector_comparison()
-    plt.savefig('detector_comparison.png')
+    # plt.savefig('detector_comparison.png')
 
     # 6. Train ML model and show improvements
     print("Training ML model for filter width optimization...")
@@ -549,6 +549,6 @@ if __name__ == "__main__":
     # 7. ML predictions vs actual
     print("Validating ML model performance...")
     results = sim.plot_ml_vs_keyrate(model)
-    plt.savefig('ml_improvements.png')
+    # plt.savefig('ml_improvements.png')
 
     plt.show()
